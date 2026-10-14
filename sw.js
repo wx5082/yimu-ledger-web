@@ -1,5 +1,5 @@
 /* Cache only this app's static assets. Account sign-in routes and user data are never cached here. */
-const SHELL_CACHE='yimu-shell-v5';
+const SHELL_CACHE='yimu-shell-v6';
 const OCR_CACHE='yimu-ocr-v7-int';
 const SHELL_FILES=['./index.html','./style.css','./app.js','./domain.js','./offline.js','./manifest.webmanifest','./assets/icon-192.png','./assets/icon-512.png'];
 const OCR_FILES=['./assets/ocr/tesseract.min.js','./assets/ocr/worker.min.js',

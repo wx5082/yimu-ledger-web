@@ -70,6 +70,8 @@ async function ensureOwn(){if(demo){await startOwn();if(demo)return false;}retur
 async function importStart(){if(!await ensureOwn())return;showImport();}
 async function loadOcr(){if(window.Tesseract)return;if(!window.ocrLoad)window.ocrLoad=new Promise((res,rej)=>{const script=document.createElement('script');script.src='./assets/ocr/tesseract.min.js';script.onload=res;script.onerror=()=>{window.ocrLoad=null;script.remove();rej(new Error('识别引擎下载失败，请检查网络'));};document.head.append(script);});await window.ocrLoad;}
 async function processImage(file){const url=URL.createObjectURL(file);try{const im=new Image();im.src=url;await im.decode();if(im.width*im.height>30000000)throw new Error('图片像素过大，请先裁剪');const ratio=Math.min(1,1600/Math.max(im.width,im.height));const canvas=document.createElement('canvas');canvas.width=Math.round(im.width*ratio);canvas.height=Math.round(im.height*ratio);const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(im,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.87);}finally{URL.revokeObjectURL(url);}}
+// 支付详情的大号金额单独从原图裁出并放大，避免整页 OCR 的版面分析漏掉它。
+async function cropPaymentAmount(file){const url=URL.createObjectURL(file);try{const im=new Image();im.src=url;await im.decode();const x=im.width*.14,y=im.height*.32,w=im.width*.72,h=im.height*.24;const canvas=document.createElement('canvas');canvas.width=Math.round(w*2);canvas.height=Math.round(h*2);const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(im,x,y,w,h,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/png');}finally{URL.revokeObjectURL(url);}}
 function updateProgress(message,progress){const e=$('#ocr-status');if(e)e.textContent=message;const p=$('#ocr-progress');if(p)p.style.width=Math.round(progress*100)+'%';}
 // 每张截图只运行一次 OCR；识别出的多笔交易排入同一个逐笔核对队列。
 async function recognizeNext(){
@@ -109,10 +111,22 @@ async function recognizeNext(){
   if(!busy||index!==importIndex||run!==ocrRun){await localWorker.terminate();return;}
   worker=localWorker;phase='正在识别文字';lastProgress=Date.now();
   const {data}=await localWorker.recognize(image);
+  let ocrText=data.text;
+  // 整页已识别出支付详情但漏掉金额时，再对原图中央金额区域做稀疏文字识别。
+  if(/交易详情|支付时间/.test(ocrText)&&parseReceipts(ocrText,state.cards).some(item=>!item.cents)){
+   try{
+    phase='单独识别金额';lastProgress=Date.now();updateProgress('正在单独识别大号金额…',0);
+    await localWorker.setParameters({tessedit_pageseg_mode:'11'});
+    const amountImage=await cropPaymentAmount(file);
+    const amountResult=await localWorker.recognize(amountImage);
+    const found=amountResult.data.text.match(/[-−－—–一]?\s*([0-9０-９Oo〇]{1,6})\s*[.．。]\s*([0-9０-９Oo〇])\s*([0-9０-９Oo〇])(?![0-9０-９Oo〇])/);
+    if(found)ocrText+=`\n[金额区域单独识别]\n${amountResult.data.text}\n交易详情\n-${found[1]}.${found[2]}${found[3]}`;
+   }catch(error){console.warn('金额区域识别失败',error);}
+  }
   await localWorker.terminate();worker=null;
   if(!busy||index!==importIndex||run!==ocrRun)return;
   busy=false;
-  const candidates=parseReceipts(data.text,state.cards).map(item=>{
+  const candidates=parseReceipts(ocrText,state.cards).map(item=>{
    const candidate={...item,image};
    if(data.confidence<70)candidate.warnings.unshift('识别清晰度较低，请仔细核对原图');
    return {candidate};

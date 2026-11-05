@@ -35,20 +35,30 @@ export function parseReceipt(raw,cards,now=new Date()){
  for(const line of lines){if(/余额|额度|可用|尾号|账号|卡号|积分/.test(line)&&!/交易金额|消费|支出|收入|入账|退款|还款/.test(line))continue;
  for(const match of line.matchAll(/(?:人民币|金额|消费|支出|收入|入账|退款|还款|CNY|RMB|[¥￥])\s*[:为]?\s*([+-]?\s*\d[\d,]*(?:\.\d{1,2})?)/gi)){const n=Number(match[1].replace(/[\s,]/g,''));if(Number.isFinite(n)&&n!==0)candidates.push(Math.round(Math.abs(n)*100));}
  if(!candidates.length){const match=line.match(/([+-]?\d[\d,]*\.\d{2})\s*元/);if(match)candidates.push(Math.round(Math.abs(Number(match[1].replace(/,/g,'')))*100));}}
+ // 微信交易详情以醒目的独立负数显示付款额，订单号等长数字不能参与金额识别。
+ if(!candidates.length&&/交易详情|支付时间|支付方式/.test(text)){
+  const signed=text.match(/(?:^|\n)\s*[-−－+]\s*(\d{1,8}\.\d{2})(?!\d)/);
+  if(signed)candidates.push(Math.round(Number(signed[1])*100));
+ }
  const dt=text.match(/(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})/);const md=text.match(/(?:于|日期|时间)\s*(\d{1,2})[月/.-](\d{1,2})/);
  const date=dt?`${dt[1]}-${dt[2].padStart(2,'0')}-${dt[3].padStart(2,'0')}`:md?`${now.getFullYear()}-${md[1].padStart(2,'0')}-${md[2].padStart(2,'0')}`:'';
+ const clock=text.match(/(?:支付时间|交易时间)\s*:?\s*20\d{2}[年/.-]\d{1,2}[月/.-]\d{1,2}日?\s*(\d{1,2}):(\d{2})(?::\d{2})?/);
+ const time=clock?`${clock[1].padStart(2,'0')}:${clock[2]}`:'';
  let type=/退款|退货/.test(text)?'refund':/信用卡还款|还款成功|还款金额/.test(text)?'repayment':/转账|转出|转入/.test(text)?'transfer':/收入|工资|入账|存入|到账/.test(text)&&!/消费|支出|支取/.test(text)?'income':'expense';
  // 同尾号可能属于不同银行；只有银行和卡尾号共同确定时才自动归卡。
  const tail=text.match(/(?:尾号|末四位|末4位)\D{0,8}(\d{4})/)||text.match(/(?:借记卡|储蓄卡|贷记卡|信用卡)[^\n\d]{0,18}(\d{4})(?!\d)/),bankName=detectBank(text);
  const matching=tail?cards.filter(c=>c.tail===tail[1]&&(!bankName||c.name===bankName||detectBank(c.name)===bankName)):[];
  const card=matching.length===1?matching[0]:null;
  const merchant=text.match(/(?:商户名称|交易商户|商户|交易摘要|交易说明|用途|摘要|收款方)\s*[:：]\s*([^\n]{1,60})/);
+ // 美团等支付详情把商品和订单号放在同一字段，只保留可读的商品名称。
+ const goods=text.match(/(?:^|\n)\s*商品\s*:?\s*([\s\S]*?)(?=\n\s*(?:收单机构|支付方式|交易单号|商户单号|当前状态)\s*:?|$)/);
+ const product=goods?.[1].replace(/\s*\n\s*/g,'').replace(/[-—–]?美团App[-—–]?[\s\S]*$/i,'').replace(/[-—–]?\d{12,}[\s\S]*$/,'').trim()||'';
  // 银行通知若没有“商户”标签，从交易类型后的括号提取付款对象。
  const detail=text.match(/(?:支出|消费|收入|入账)\s*[（(]\s*([^\n）)]{2,90})/);
- const title=merchant?merchant[1].trim():detail?detail[1].replace(/^(?:财付通|微信|支付宝)\s*快捷支付\s*[-—–]?\s*/,'').replace(/[.。…]+$/,'').trim():'';
+ const title=product|| (merchant?merchant[1].trim():detail?detail[1].replace(/^(?:财付通|微信|支付宝)\s*快捷支付\s*[-—–]?\s*/,'').replace(/[.。…]+$/,'').trim():'');
  const direction=type==='transfer'?(/转入|入账|收款/.test(text)&&!/转出|付款/.test(text)?'in':/转出|付款/.test(text)&&!/转入|入账|收款/.test(text)?'out':''):type==='income'||type==='refund'||type==='repayment'?'in':'out';
  const nonCny=/美元|美金|USD|港币|HKD|欧元|EUR/i.test(text);
- return {date:validDate(date)?date:'',cents:candidates[0]||0,type,direction,title,category:inferCategory(title||text),cardId:card?.id||'',bankName,recognizedTail:tail?.[1]||'',kindHint:/信用卡|贷记卡/.test(text)?'credit':/储蓄卡|借记卡/.test(text)?'debit':'',nonCny,raw,warnings:[...(!date?['未识别到完整日期，请核对']:[]),...(!card?['请选择或新建对应银行卡']:[]),...(matching.length>1?['有多张卡尾号相同，请确认发卡银行']:[]),...(!direction?['无法确定转账方向，请手动选择入账或出账']:[]),...(nonCny?['识别到外币，不能直接作为人民币入账']:[]),...(!title?['请补充交易内容']:[]),...(candidates.length>1?['检测到多个金额，请对照原图核对']:[]),...(!candidates.length?['未识别到交易金额，请手动填写']:[])]};
+ return {date:validDate(date)?date:'',time,cents:candidates[0]||0,type,direction,title,category:inferCategory(title||text),cardId:card?.id||'',bankName,recognizedTail:tail?.[1]||'',kindHint:/信用卡|贷记卡/.test(text)?'credit':/储蓄卡|借记卡/.test(text)?'debit':'',nonCny,raw,warnings:[...(!date?['未识别到完整日期，请核对']:[]),...(!card?['请选择或新建对应银行卡']:[]),...(matching.length>1?['有多张卡尾号相同，请确认发卡银行']:[]),...(!direction?['无法确定转账方向，请手动选择入账或出账']:[]),...(nonCny?['识别到外币，不能直接作为人民币入账']:[]),...(!title?['请补充交易内容']:[]),...(candidates.length>1?['检测到多个金额，请对照原图核对']:[]),...(!candidates.length?['未识别到交易金额，请手动填写']:[])]};
 }
 // 一张截图可能包含多条重复的动账通知，分别生成待核对账单。
 export function parseReceipts(raw,cards,now=new Date()){
@@ -61,6 +71,6 @@ export function parseReceipts(raw,cards,now=new Date()){
 export function validateBackup(data){
  if(data?.version!==1||!Array.isArray(data.cards)||!Array.isArray(data.rows)||data.cards.length>100||data.rows.length>10000)throw new Error('备份格式不正确或数量超出限制');
  const ids=new Set();for(const c of data.cards){if(typeof c.id!=='string'||ids.has(c.id)||typeof c.name!=='string'||c.name.length>50||!['debit','credit'].includes(c.kind)||!/^\d{4}$/.test(c.tail)||c.kind==='credit'&&(!Number.isInteger(c.billDay)||c.billDay<1||c.billDay>31||!Number.isInteger(c.dueDay)||c.dueDay<1||c.dueDay>31))throw new Error('银行卡数据不完整');ids.add(c.id);}
- const rowIds=new Set();for(const r of data.rows){if(typeof r.id!=='string'||rowIds.has(r.id)||!validDate(r.date)||!Number.isSafeInteger(r.cents)||r.cents<=0||r.cents>1e12||!types[r.type]||!ids.has(r.cardId)||typeof r.title!=='string'||r.title.length>100||!categories.includes(r.category)||r.direction&&!['in','out'].includes(r.direction)||r.type==='repayment'&&(!validDate(r.statementEnd)||data.cards.find(c=>c.id===r.cardId)?.kind!=='credit')||r.image&&(!/^data:image\/(jpeg|png|webp);base64,/.test(r.image)||r.image.length>3000000))throw new Error('账单数据不完整');rowIds.add(r.id);}
+ const rowIds=new Set();for(const r of data.rows){if(typeof r.id!=='string'||rowIds.has(r.id)||!validDate(r.date)||r.time&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(r.time)||!Number.isSafeInteger(r.cents)||r.cents<=0||r.cents>1e12||!types[r.type]||!ids.has(r.cardId)||typeof r.title!=='string'||r.title.length>100||!categories.includes(r.category)||r.direction&&!['in','out'].includes(r.direction)||r.type==='repayment'&&(!validDate(r.statementEnd)||data.cards.find(c=>c.id===r.cardId)?.kind!=='credit')||r.image&&(!/^data:image\/(jpeg|png|webp);base64,/.test(r.image)||r.image.length>3000000))throw new Error('账单数据不完整');rowIds.add(r.id);}
  return {version:1,cards:data.cards,rows:data.rows};
 }

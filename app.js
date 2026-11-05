@@ -113,7 +113,7 @@ async function recognizeNext(){
   const {data}=await localWorker.recognize(image);
   let ocrText=data.text;
   // 整页已识别出支付详情但漏掉金额时，再对原图中央金额区域做稀疏文字识别。
-  if(/交易详情|支付时间/.test(ocrText)&&parseReceipts(ocrText,state.cards).some(item=>!item.cents)){
+  if(/交易详情|支付时间/.test(ocrText.replace(/\s+/g,''))&&parseReceipts(ocrText,state.cards).some(item=>!item.cents)){
    try{
     phase='单独识别金额';lastProgress=Date.now();updateProgress('正在单独识别大号金额…',0);
     await localWorker.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.-−—–'});

@@ -73,7 +73,7 @@ async function importStart(){if(!await ensureOwn())return;showImport();}
 async function loadOcr(){if(window.Tesseract)return;if(!window.ocrLoad)window.ocrLoad=new Promise((res,rej)=>{const script=document.createElement('script');script.src='./assets/ocr/tesseract.min.js';script.onload=res;script.onerror=()=>{window.ocrLoad=null;script.remove();rej(new Error('识别引擎下载失败，请检查网络'));};document.head.append(script);});await window.ocrLoad;}
 async function processImage(file){const url=URL.createObjectURL(file);try{const im=new Image();im.src=url;await im.decode();if(im.width*im.height>30000000)throw new Error('图片像素过大，请先裁剪');const ratio=Math.min(1,1600/Math.max(im.width,im.height));const canvas=document.createElement('canvas');canvas.width=Math.round(im.width*ratio);canvas.height=Math.round(im.height*ratio);const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(im,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/jpeg',.87);}finally{URL.revokeObjectURL(url);}}
 // 支付详情的大号金额单独从原图裁出并放大，避免整页 OCR 的版面分析漏掉它。
-async function cropPaymentAmount(file){const url=URL.createObjectURL(file);try{const im=new Image();im.src=url;await im.decode();const x=im.width*.18,y=im.height*.395,w=im.width*.64,h=im.height*.105;const canvas=document.createElement('canvas');canvas.width=Math.round(w*2.5);canvas.height=Math.round(h*2.5);const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(im,x,y,w,h,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/png');}finally{URL.revokeObjectURL(url);}}
+async function cropPaymentAmount(file){const url=URL.createObjectURL(file);try{const im=new Image();im.src=url;await im.decode();const x=im.width*.18,y=im.height*.405,w=im.width*.64,h=im.height*.075;const canvas=document.createElement('canvas');canvas.width=Math.round(w*3);canvas.height=Math.round(h*3);const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(im,x,y,w,h,0,0,canvas.width,canvas.height);return canvas.toDataURL('image/png');}finally{URL.revokeObjectURL(url);}}
 function updateProgress(message,progress){const e=$('#ocr-status');if(e)e.textContent=message;const p=$('#ocr-progress');if(p)p.style.width=Math.round(progress*100)+'%';}
 // 每张截图只运行一次 OCR；识别出的多笔交易排入同一个逐笔核对队列。
 async function recognizeNext(){
@@ -121,8 +121,10 @@ async function recognizeNext(){
     await localWorker.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.-−—–'});
     const amountImage=await cropPaymentAmount(file);
     const amountResult=await localWorker.recognize(amountImage);
-    const found=amountResult.data.text.match(/[-−－—–一]?\s*([0-9０-９Oo〇]{1,6})\s*[.．。]\s*([0-9０-９Oo〇])\s*([0-9０-９Oo〇])(?![0-9０-９Oo〇])/);
+    let found=amountResult.data.text.match(/[-−－—–一]?\s*([0-9０-９Oo〇]{1,6})\s*[.．。]\s*([0-9０-９Oo〇])\s*([0-9０-９Oo〇])(?![0-9０-９Oo〇])/);
     ocrText+=`\n[金额区域单独识别原文]\n${amountResult.data.text}`;
+    // 中文模型只读出部分数字时，改用已缓存的英文数字模型再识别同一行。
+    if(!found){await localWorker.reinitialize('eng',1);await localWorker.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.-'});const english=await localWorker.recognize(amountImage);ocrText+=`\n[英文数字模型识别原文]\n${english.data.text}`;found=english.data.text.match(/-?\s*(\d{1,6})\s*[.]\s*(\d)\s*(\d)(?!\d)/);}
     if(found)ocrText+=`\n交易详情\n-${found[1]}.${found[2]}${found[3]}`;
    }catch(error){ocrText+=`\n[金额区域单独识别失败：${error.message||'未知错误'}]`;}
   }

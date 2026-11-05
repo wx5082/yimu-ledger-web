@@ -37,8 +37,9 @@ export function parseReceipt(raw,cards,now=new Date()){
  if(!candidates.length){const match=line.match(/([+-]?\d[\d,]*\.\d{2})\s*元/);if(match)candidates.push(Math.round(Math.abs(Number(match[1].replace(/,/g,'')))*100));}}
  // 微信交易详情以醒目的独立负数显示付款额，订单号等长数字不能参与金额识别。
  if(!candidates.length&&/交易详情|支付时间|支付方式/.test(text)){
-  const signed=text.match(/(?:^|\n)\s*[-−－+]\s*(\d{1,8}\.\d{2})(?!\d)/);
-  if(signed)candidates.push(Math.round(Number(signed[1])*100));
+  // 手机 OCR 会把负号识别成长横线或汉字“一”，也会把数字 0 识别为字母 O。
+  const signed=text.match(/(?:^|\n|交易详情)[^\n]{0,12}?[-−－—–一+]\s*([0-9０-９Oo〇]{1,6})\s*[.．。]\s*([0-9０-９Oo〇])\s*([0-9０-９Oo〇])(?![0-9０-９Oo〇])/);
+  if(signed){const digits=([signed[1],signed[2],signed[3]].join('')).replace(/[Oo〇]/g,'0').replace(/[０-９]/g,c=>String(c.charCodeAt(0)-65296));candidates.push(Number(digits));}
  }
  const dt=text.match(/(20\d{2})[年/.-](\d{1,2})[月/.-](\d{1,2})/);const md=text.match(/(?:于|日期|时间)\s*(\d{1,2})[月/.-](\d{1,2})/);
  const date=dt?`${dt[1]}-${dt[2].padStart(2,'0')}-${dt[3].padStart(2,'0')}`:md?`${now.getFullYear()}-${md[1].padStart(2,'0')}-${md[2].padStart(2,'0')}`:'';

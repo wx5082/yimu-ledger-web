@@ -12,3 +12,5 @@
 /* 手机核对表单改为单列，避免 Safari 的日期、时间和银行卡控件挤压重叠。 */
 .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid>.field{min-width:0}.form-grid .field input,.form-grid .field select,.form-grid .field textarea{width:100%;min-width:0;max-width:100%}
 @media(max-width:760px){dialog .form-grid{grid-template-columns:minmax(0,1fr)}}
+
+.copy-ocr{margin-top:10px;min-height:40px}
